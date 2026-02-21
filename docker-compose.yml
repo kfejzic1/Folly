@@ -7,11 +7,6 @@ services:
       - ollama_data:/root/.ollama
     devices:
       - nvidia.com/gpu=all
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   ollama-pull:
     image: docker.io/ollama/ollama
@@ -21,23 +16,39 @@ services:
       OLLAMA_HOST: http://ollama:11434
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - "sleep 5 && ollama pull ${OLLAMA_MODEL:-llama3.1} && echo 'Model pulled successfully.'"
-    depends_on:
-      ollama:
-        condition: service_healthy
+      - |
+        until ollama list 2>/dev/null; do
+          echo 'Waiting for Ollama to be ready...'
+          sleep 2
+        done
+        ollama pull ${OLLAMA_MODEL:-llama3.1}
+        echo 'Model pulled successfully.'
 
   folly-api:
     build: .
     networks:
       - folly-net
-    command: >
-      folly-api http://ollama:11434/v1
-      --model ${OLLAMA_MODEL:-llama3.1}
-      example_challenges/example_config.json
-      --port 5000
-    depends_on:
-      ollama-pull:
-        condition: service_completed_successfully
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for model ${OLLAMA_MODEL:-llama3.1} to be available..."
+        until python3 -c "
+        import urllib.request, json, sys
+        try:
+            resp = urllib.request.urlopen('http://ollama:11434/api/tags')
+            data = json.loads(resp.read())
+            models = [m['name'] for m in data.get('models', [])]
+            sys.exit(0 if any('${OLLAMA_MODEL:-llama3.1}' in name for name in models) else 1)
+        except Exception:
+            sys.exit(1)
+        " 2>/dev/null; do
+          sleep 3
+        done
+        echo "Model ready, starting API..."
+        exec folly-api http://ollama:11434/v1 \
+          --model "${OLLAMA_MODEL:-llama3.1}" \
+          example_challenges/example_config.json \
+          --port 5000
 
   folly-ui:
     build: .
@@ -49,8 +60,6 @@ services:
       --no-browser
     ports:
       - "5001:5001"
-    depends_on:
-      - folly-api
 
 networks:
   folly-net:
