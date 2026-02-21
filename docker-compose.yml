@@ -1,0 +1,59 @@
+services:
+  ollama:
+    image: docker.io/ollama/ollama
+    networks:
+      - folly-net
+    volumes:
+      - ollama_data:/root/.ollama
+    devices:
+      - nvidia.com/gpu=all
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ollama-pull:
+    image: docker.io/ollama/ollama
+    networks:
+      - folly-net
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "sleep 5 && ollama pull ${OLLAMA_MODEL:-llama3.1} && echo 'Model pulled successfully.'"
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  folly-api:
+    build: .
+    networks:
+      - folly-net
+    command: >
+      folly-api http://ollama:11434/v1
+      --model ${OLLAMA_MODEL:-llama3.1}
+      example_challenges/example_config.json
+      --port 5000
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+
+  folly-ui:
+    build: .
+    networks:
+      - folly-net
+    command: >
+      folly-ui http://folly-api:5000
+      --port 5001
+      --no-browser
+    ports:
+      - "5001:5001"
+    depends_on:
+      - folly-api
+
+networks:
+  folly-net:
+
+volumes:
+  ollama_data:

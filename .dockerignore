@@ -1,0 +1,11 @@
+venv/
+*.egg-info/
+__pycache__/
+.git/
+*.pyc
+*.pyo
+.gitignore
+*.md
+*.png
+*.gif
+folly.egg-info/
