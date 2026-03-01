@@ -1,6 +1,7 @@
 services:
   ollama:
     image: docker.io/ollama/ollama
+    container_name: ollama
     networks:
       - folly-net
     volumes:
@@ -10,35 +11,68 @@ services:
 
   ollama-pull:
     image: docker.io/ollama/ollama
+    container_name: ollama-pull
     networks:
       - folly-net
     environment:
       OLLAMA_HOST: http://ollama:11434
-    entrypoint: ["/bin/sh", "-c"]
+    entrypoint: ['/bin/sh', '-c']
     command:
       - |
         until ollama list 2>/dev/null; do
           echo 'Waiting for Ollama to be ready...'
           sleep 2
         done
-        ollama pull ${OLLAMA_MODEL:-llama3.1}
+        ollama pull ${OLLAMA_MODEL:-llama3.2:3b}
         echo 'Model pulled successfully.'
 
-  folly-api:
-    build: .
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
     networks:
       - folly-net
-    entrypoint: ["/bin/sh", "-c"]
+    ports:
+      - '3000:8080'
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_AUTH=False
+    volumes:
+      - open-webui-data:/app/backend/data
+    entrypoint: ['/bin/sh', '-c']
     command:
       - |
-        echo "Waiting for model ${OLLAMA_MODEL:-llama3.1} to be available..."
+        echo "Waiting for model ${OLLAMA_MODEL:-llama3.2:3b} to be available for WebUI..."
         until python3 -c "
         import urllib.request, json, sys
         try:
             resp = urllib.request.urlopen('http://ollama:11434/api/tags')
             data = json.loads(resp.read())
             models = [m['name'] for m in data.get('models', [])]
-            sys.exit(0 if any('${OLLAMA_MODEL:-llama3.1}' in name for name in models) else 1)
+            sys.exit(0 if any('${OLLAMA_MODEL:-llama3.2:3b}' in name for name in models) else 1)
+        except Exception:
+            sys.exit(1)
+        " 2>/dev/null; do
+          sleep 3
+        done
+        echo "Model ready, starting Open WebUI..."
+        exec /app/backend/start.sh
+
+  folly-api:
+    build: .
+    container_name: folly-api
+    networks:
+      - folly-net
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        echo "Waiting for model ${OLLAMA_MODEL:-llama3.2:3b} to be available..."
+        until python3 -c "
+        import urllib.request, json, sys
+        try:
+            resp = urllib.request.urlopen('http://ollama:11434/api/tags')
+            data = json.loads(resp.read())
+            models = [m['name'] for m in data.get('models', [])]
+            sys.exit(0 if any('${OLLAMA_MODEL:-llama3.2:3b}' in name for name in models) else 1)
         except Exception:
             sys.exit(1)
         " 2>/dev/null; do
@@ -46,23 +80,24 @@ services:
         done
         echo "Model ready, starting API..."
         exec folly-api http://ollama:11434/v1 \
-          --model "${OLLAMA_MODEL:-llama3.1}" \
+          --model "${OLLAMA_MODEL:-llama3.2:3b}" \
           example_challenges/example_config.json \
           --port 5000
 
   folly-ui:
     build: .
+    container_name: folly-ui
     networks:
       - folly-net
     command: >
-      folly-ui http://folly-api:5000
-      --port 5001
-      --no-browser
+      folly-ui http://folly-api:5000 --port 5001 --no-browser
+
     ports:
-      - "5001:5001"
+      - '5001:5001'
 
 networks:
   folly-net:
 
 volumes:
   ollama_data:
+  open-webui-data:
