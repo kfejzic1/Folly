@@ -1,6 +1,8 @@
 services:
   ollama:
     image: docker.io/ollama/ollama
+    logging:
+      driver: k8s-file
     container_name: ollama
     networks:
       - folly-net
@@ -11,6 +13,8 @@ services:
 
   ollama-pull:
     image: docker.io/ollama/ollama
+    logging:
+      driver: k8s-file
     container_name: ollama-pull
     networks:
       - folly-net
@@ -26,39 +30,10 @@ services:
         ollama pull ${OLLAMA_MODEL:-llama3.2:3b}
         echo 'Model pulled successfully.'
 
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:main
-    container_name: open-webui
-    networks:
-      - folly-net
-    ports:
-      - '3000:8080'
-    environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - WEBUI_AUTH=False
-    volumes:
-      - open-webui-data:/app/backend/data
-    entrypoint: ['/bin/sh', '-c']
-    command:
-      - |
-        echo "Waiting for model ${OLLAMA_MODEL:-llama3.2:3b} to be available for WebUI..."
-        until python3 -c "
-        import urllib.request, json, sys
-        try:
-            resp = urllib.request.urlopen('http://ollama:11434/api/tags')
-            data = json.loads(resp.read())
-            models = [m['name'] for m in data.get('models', [])]
-            sys.exit(0 if any('${OLLAMA_MODEL:-llama3.2:3b}' in name for name in models) else 1)
-        except Exception:
-            sys.exit(1)
-        " 2>/dev/null; do
-          sleep 3
-        done
-        echo "Model ready, starting Open WebUI..."
-        exec /app/backend/start.sh
-
   folly-api:
     build: .
+    logging:
+      driver: k8s-file
     container_name: folly-api
     networks:
       - folly-net
@@ -86,11 +61,14 @@ services:
 
   folly-ui:
     build: .
+    logging:
+      driver: k8s-file
     container_name: folly-ui
     networks:
       - folly-net
     command: >
       folly-ui http://folly-api:5000 --port 5001 --no-browser
+
 
     ports:
       - '5001:5001'
@@ -100,4 +78,3 @@ networks:
 
 volumes:
   ollama_data:
-  open-webui-data:
